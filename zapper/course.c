@@ -11,6 +11,7 @@ int dict_extended_len = 0;
 int in_dict(char *seq, char next_char);
 int dict_index(char *seq);
 void fill_dict(char *dict);
+int *lzw_encrypt(char *buff, char *dict);
 
 void main()
 {
@@ -26,54 +27,27 @@ void main()
     }
     size_t n, m;
     char buff[BUFF_SIZE] = {0};
-    int message[BUFF_SIZE] = {0};
+    int *message;
+    char seq[BUFF_SIZE] = {0};
+    for (int i = 1; i < 256; i++)
+    {
+        seq[0] = i;
+        char *seq_address = malloc(sizeof strlen(seq));
+        strcpy(seq_address, seq);
+        dict[i] = seq_address;
+    }
     do {
         n = fread(buff, 1, sizeof buff, in);
-        int i = 0;
         int i_m = 0;
-        char seq[BUFF_SIZE] = {0};
-        for (i = 1; i < 256; i++) {
-            seq[0] = i;
-            char *seq_address = malloc(sizeof strlen(seq));
-            strcpy(seq_address, seq);
-            dict[i] = seq_address;
-        }
-        i = 0;
         memset(seq, 0, sizeof seq);
         if (n) {
-            while ((seq[0] = buff[i++]) != 0)
-            {
-                int j = 0;
-                while (1)
-                {
-                    if (!in_dict(seq, buff[i]))
-                    {
-                        seq[strlen(seq) - 1] = 0;
-                        message[i_m++] = dict_index(seq);
-                        printf("%d ", dict_index(seq));
-                        seq[++j] = buff[i];
-                        char *seq_address = malloc(sizeof strlen(seq));
-                        strcpy(seq_address, seq);
-                        dict[256 + dict_extended_len++] = seq_address;
-                        break;
-                    }
-                    else if (buff[i] == 0) {
-                        printf("%d ", dict_index(seq));
-                        message[i_m++] = dict_index(seq);
-                        i++;
-                        break;
-                    }
-                    else 
-                        seq[++j] = buff[i++];
-                }
-                memset(seq, 0, sizeof seq);
-            }
+            message = lzw_encrypt(buff, dict);
         }
         else
         {
             m = 0;
         }
-    } while ((n > 0) && (m == n));
+    } while ((n > 0) && (m == 1));
 
     memset(dict, 0, sizeof dict);
     int i = 0;
@@ -127,10 +101,40 @@ void main()
         perror("close input file");
 }
 
-// int *lzw_encrypt(char *buff, char *dict) {
-//     int result[BUFF_SIZE] = {0};
-
-// }
+int *lzw_encrypt(char *buff, char *dict) {
+    int result[BUFF_SIZE] = {0};
+    char seq[BUFF_SIZE] = {0};
+    int i = 0, i_m = 0;
+    while ((seq[0] = buff[i++]) != 0)
+    {
+        int j = 0;
+        while (1)
+        {
+            if (!in_dict(seq, buff[i]))
+            {
+                seq[strlen(seq) - 1] = 0;
+                result[i_m++] = dict_index(seq);
+                printf("%d ", dict_index(seq));
+                seq[++j] = buff[i];
+                char *seq_address = malloc(sizeof strlen(seq));
+                strcpy(seq_address, seq);
+                dict[256 + dict_extended_len++] = seq_address;
+                break;
+            }
+            else if (buff[i] == 0)
+            {
+                printf("%d ", dict_index(seq));
+                result[i_m++] = dict_index(seq);
+                i++;
+                break;
+            }
+            else
+                seq[++j] = buff[i++];
+        }
+        memset(seq, 0, sizeof seq);
+    }
+    return result;
+}
 
 int in_dict(char *seq, char next_char)
 {
