@@ -1,4 +1,6 @@
 *.exe
 *.json
 *.txt
-asm_labs34/
+*.pdf
+*.zap
+asm_labs/

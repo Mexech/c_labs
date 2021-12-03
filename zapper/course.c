@@ -2,26 +2,31 @@
 #include <string.h>
 
 #define BUFF_SIZE 8192
-#define DICT_SIZE 1024000
+#define DICT_SIZE 1024
+
+#define len(a)                      \
+    ({int l;                         \
+    for (l = 0; l < BUFF_SIZE; l++) \
+        if (a[l] == 0)              \
+            break;                  \
+    l;})
 
 char *dict[DICT_SIZE];
-
 int dict_extended_len = 0;
 
 int in_dict(char *seq, char next_char);
 int dict_index(char *seq);
 void fill_dict(char *dict);
-int *lzw_encrypt(char *buff, char *dict);
+int *lzw_encrypt(char *buff);
 
 void main()
 {
     FILE *in, *out;
-
-    in = fopen("F:/Projects/c_labs/zapper/owo.txt", "rb");
+    in = fopen("F:/Projects/c_labs/zapper/in.txt", "rb");
     if (in == NULL) {
         perror("nonexistant input file");
     }
-    out = fopen("F:/Projects/c_labs/zapper/wow.txt", "wb");
+    out = fopen("F:/Projects/c_labs/zapper/out.zap", "wb+");
     if (out == NULL) {
         perror("nonexistant output file");
     }
@@ -41,17 +46,26 @@ void main()
         int i_m = 0;
         memset(seq, 0, sizeof seq);
         if (n) {
-            message = lzw_encrypt(buff, dict);
+            message = lzw_encrypt(buff);
+            printf("%d", len(message));
+            fwrite(message, sizeof(message[0]), len(message), out);
         }
         else
         {
             m = 0;
         }
     } while ((n > 0) && (m == 1));
-
+    fclose(out);
+    in = fopen("F:/Projects/c_labs/zapper/out.zap", "rb");
+    if (in == NULL)
+    {
+        perror("nonexistant input file");
+    }
+    memset(message, 0, len(message)); // FIXME: Should be declared as pointer to array! 
+    fread(message, 4, BUFF_SIZE, in);
     memset(dict, 0, sizeof dict);
+    memset(buff, 0, BUFF_SIZE);
     int i = 0;
-    char seq[BUFF_SIZE] = {0};
     dict_extended_len = 0;
     for (i = 1; i < 256; i++)
     {
@@ -101,8 +115,8 @@ void main()
         perror("close input file");
 }
 
-int *lzw_encrypt(char *buff, char *dict) {
-    int result[BUFF_SIZE] = {0};
+int *lzw_encrypt(char *buff) {
+    static int result[BUFF_SIZE] = {0};
     char seq[BUFF_SIZE] = {0};
     int i = 0, i_m = 0;
     while ((seq[0] = buff[i++]) != 0)
