@@ -5,7 +5,7 @@
 #define DICT_SIZE 1024
 
 #define len(a)                      \
-    ({int l;                         \
+    ({int l;                        \
     for (l = 0; l < BUFF_SIZE; l++) \
         if (a[l] == 0)              \
             break;                  \
@@ -18,15 +18,16 @@ int in_dict(char *seq, char next_char);
 int dict_index(char *seq);
 void fill_dict(char *dict);
 int *lzw_encrypt(char *buff);
+char *lzw_decrypt(int *buff);
 
 void main()
 {
     FILE *in, *out;
-    in = fopen("F:/Projects/c_labs/zapper/in.txt", "rb");
+    in = fopen("in.txt", "rb");
     if (in == NULL) {
         perror("nonexistant input file");
     }
-    out = fopen("F:/Projects/c_labs/zapper/out.zap", "wb+");
+    out = fopen("out.zap", "wb+");
     if (out == NULL) {
         perror("nonexistant output file");
     }
@@ -47,7 +48,6 @@ void main()
         memset(seq, 0, sizeof seq);
         if (n) {
             message = lzw_encrypt(buff);
-            printf("%d", len(message));
             fwrite(message, sizeof(message[0]), len(message), out);
         }
         else
@@ -56,12 +56,12 @@ void main()
         }
     } while ((n > 0) && (m == 1));
     fclose(out);
-    in = fopen("F:/Projects/c_labs/zapper/out.zap", "rb");
+    in = fopen("out.zap", "rb");
     if (in == NULL)
     {
         perror("nonexistant input file");
     }
-    memset(message, 0, len(message)); // FIXME: Should be declared as pointer to array! 
+    memset(message, 0, len(message)*sizeof(message[0]));
     fread(message, 4, BUFF_SIZE, in);
     memset(dict, 0, sizeof dict);
     memset(buff, 0, BUFF_SIZE);
@@ -77,35 +77,8 @@ void main()
     i = 0;
     memset(seq, 0, sizeof seq);
 
-    printf(dict[message[i]]);
-    while ((strlen(strcpy(seq, (dict[message[i + 1]]) ? dict[message[i++]] : "")) != 0) || message[++i])
-    {
-        int j = 0;
-        while (1) {
-            if (!dict[message[i]])
-            {
-                if (!strlen(seq))
-                    strcpy(seq, dict[message[i - 1]]);
-                seq[strlen(seq)] = seq[0];
-                printf(seq);
-                char *seq_address = malloc(sizeof strlen(seq));
-                strcpy(seq_address, seq);
-                dict[256 + dict_extended_len++] = seq_address;
-                break;
-            }
-            else if (!in_dict(seq, dict[message[i]][j]))
-            {
-                printf(dict[message[i]]);
-                char *seq_address = malloc(sizeof strlen(seq));
-                strcpy(seq_address, seq);
-                dict[256 + dict_extended_len++] = seq_address;
-                break;
-            }
-            else
-                seq[++j] = dict[message[i + 1]][j];
-        }
-        memset(seq, 0, sizeof seq);
-    } 
+    char *result = lzw_decrypt(message);
+    printf(result);
 
     // if (m)
     //     perror("copy");
@@ -118,10 +91,10 @@ void main()
 int *lzw_encrypt(char *buff) {
     static int result[BUFF_SIZE] = {0};
     char seq[BUFF_SIZE] = {0};
-    int i = 0, i_m = 0;
+    int i = 0, i_m = 0, j = 0;
     while ((seq[0] = buff[i++]) != 0)
     {
-        int j = 0;
+        j = 0;
         while (1)
         {
             if (!in_dict(seq, buff[i]))
@@ -144,6 +117,42 @@ int *lzw_encrypt(char *buff) {
             }
             else
                 seq[++j] = buff[i++];
+        }
+        memset(seq, 0, sizeof seq);
+    }
+    return result;
+}
+
+char *lzw_decrypt(int *buff) {
+    static char result[BUFF_SIZE] = {0}; // TODO: might need realloc
+    char seq[BUFF_SIZE] = {0};
+    int i = 0, i_m = 0, j = 0;
+    strcpy(result, dict[buff[i]]);
+    while ((strlen(strcpy(seq, (dict[buff[i + 1]]) ? dict[buff[i++]] : "")) != 0) || buff[++i])
+    {
+        j = 0;
+        while (1) {
+            if (!dict[buff[i]])
+            {
+                if (!strlen(seq))
+                    strcpy(seq, dict[buff[i - 1]]);
+                seq[strlen(seq)] = seq[0];
+                strcat(result, seq);
+                char *seq_address = malloc(sizeof strlen(seq));
+                strcpy(seq_address, seq);
+                dict[256 + dict_extended_len++] = seq_address;
+                break;
+            }
+            else if (!in_dict(seq, dict[buff[i]][j]))
+            {
+                strcat(result, dict[buff[i]]);
+                char *seq_address = malloc(sizeof strlen(seq));
+                strcpy(seq_address, seq);
+                dict[256 + dict_extended_len++] = seq_address;
+                break;
+            }
+            else
+                seq[++j] = dict[buff[i + 1]][j];
         }
         memset(seq, 0, sizeof seq);
     }
