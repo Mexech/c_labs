@@ -1,3 +1,4 @@
+#include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -23,6 +24,7 @@ int *lzw_encrypt(char *buff);
 char *lzw_decrypt(int *buff);
 void lzw_encrypt_file(char *path, char *to_archive);
 void lzw_decrypt_file(char *path);
+void append_dict(char *seq_address);
 
 void main()
 {
@@ -81,14 +83,30 @@ void lzw_encrypt_file(char *path, char *to_archive)
         if (n)
         {
             int *message = lzw_encrypt(buff);
-            // char *result = lzw_decrypt(message); //FIXME: breaks because of these string checks
-            // printf(result);
+            free(dict);
+            dict_size = INIT_DICT_SIZE;
+            dict_extended_len = 0;
+            dict = calloc(dict_size, sizeof(char *));
+            init_dict();
+            char *result = lzw_decrypt(message); //FIXME: breaks because of these string checks
+            printf(result);
             fwrite(message, sizeof(message[0]), len(message), out);
         }
         else
             break;
     } while (1);
     dict_size = INIT_DICT_SIZE;
+}
+
+void append_dict(char *seq_address)
+{
+    if (256 + dict_extended_len + 1 >= dict_size)
+    {
+        dict_size *= 2;
+        dict = realloc(dict, dict_size * sizeof(char *));
+    }
+    dict[256 + dict_extended_len++] = seq_address;
+    dict[256 + dict_extended_len] = NULL;
 }
 
 void lzw_decrypt_file(char *path)
@@ -113,12 +131,7 @@ int *lzw_encrypt(char *buff) {
                 seq[++j] = buff[i];
                 char *seq_address = malloc(sizeof strlen(seq));
                 strcpy(seq_address, seq);
-                if (256 + dict_extended_len + 1 >= dict_size) {
-                    dict_size *= 2;
-                    dict = realloc(dict, dict_size * sizeof(char *));
-                }
-                dict[256 + dict_extended_len++] = seq_address;
-                dict[256 + dict_extended_len] = NULL; // needed because after realloc memory is uninitialized
+                append_dict(seq_address);
                 break;
             }
             else if (buff[i] == 0)
@@ -139,7 +152,7 @@ int *lzw_encrypt(char *buff) {
 char *lzw_decrypt(int *buff) {
     static char result[BUFF_SIZE] = {0}; // TODO: might need realloc
     char seq[BUFF_SIZE] = {0};
-    int i = 0, i_m = 0, j = 0;
+    int i = 0, j = 0;
     strcpy(result, dict[buff[i]]);
     while ((strlen(strcpy(seq, (dict[buff[i + 1]]) ? dict[buff[i++]] : "")) != 0) || buff[++i])
     {
@@ -153,7 +166,7 @@ char *lzw_decrypt(int *buff) {
                 strcat(result, seq);
                 char *seq_address = malloc(sizeof strlen(seq));
                 strcpy(seq_address, seq);
-                dict[256 + dict_extended_len++] = seq_address;
+                append_dict(seq_address);
                 break;
             }
             else if (!in_dict(seq, dict[buff[i]][j]))
@@ -161,7 +174,7 @@ char *lzw_decrypt(int *buff) {
                 strcat(result, dict[buff[i]]);
                 char *seq_address = malloc(sizeof strlen(seq));
                 strcpy(seq_address, seq);
-                dict[256 + dict_extended_len++] = seq_address;
+                append_dict(seq_address);
                 break;
             }
             else
@@ -176,9 +189,6 @@ int in_dict(char *seq, char next_char)
 {
     int k;
     seq[strlen(seq)] = next_char;
-    // if (256 + dict_extended_len == 270) {
-
-    // }
     for (k = 256 + dict_extended_len; k >= 0; k--)
     {
         if (!strcmp((dict[k] == 0) ? "" : dict[k], seq))
