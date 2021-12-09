@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define BUFF_SIZE 8192
+#define BUFF_SIZE 81
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
 
@@ -10,6 +10,7 @@ int dict_extended_len = 0;
 int seq_len = 0;
 int result_len = 0;
 int i_m = 0;
+int eocf = 0;
 int dict_size = INIT_DICT_SIZE;
 
 int **dict;
@@ -37,12 +38,16 @@ int main()
     FILE *out = fopen("out.zap", "wb+");
     if (out == NULL)
         perror("nonexistant output file");
-    lzw_encrypt_file("rofl.jpg", out);
+    lzw_encrypt_file("in1.txt", out);
+    lzw_encrypt_file("in2.txt", out);
+    lzw_encrypt_file("in3.txt", out);
     fclose(out);
     FILE *in = fopen("out.zap", "rb+");
     if (in == NULL)
         perror("nonexistant output file");
-    lzw_decrypt_file("decrypted.jpg", in);
+    lzw_decrypt_file("decrypted1.txt", in);
+    lzw_decrypt_file("decrypted2.txt", in);
+    lzw_decrypt_file("decrypted3.txt", in);
     return 0;
 }
 
@@ -63,6 +68,8 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
         if (n)
         {
             int *message = lzw_encrypt(buff, in, n);
+            if (n < BUFF_SIZE)
+                message[i_m++] = 256 + dict_extended_len;
             fwrite(message, sizeof(message[0]), i_m, to_arch);
             free(message);
         }
@@ -106,26 +113,27 @@ int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
 void lzw_decrypt_file(char *path, FILE *from_arch)
 {
     int buff[BUFF_SIZE] = {0};
+    eocf = 0;
     FILE *out = fopen(path, "wb+");
-    fseek(from_arch, 0L, SEEK_END);
-    int sz = ftell(from_arch);
-    fseek(from_arch, 0, SEEK_SET);
+    // fseek(from_arch, 0L, SEEK_END);
+    // int sz = ftell(from_arch);
+    // fseek(from_arch, 0, SEEK_SET);
     if (out == NULL)
         perror("nonexistant input file");
     do
     {
         size_t n = fread(buff, sizeof(buff[0]), BUFF_SIZE - 1, from_arch);
-        printf("%d\n", sz);
-        sz -= (n - 1)*sizeof(int);
+        // printf("%d\n", sz);
+        // sz -= (n - 1)*sizeof(int);
         if (n)
-        {
+        {           
             char *message = lzw_decrypt(buff, from_arch, n);
             fwrite(message, sizeof(message[0]), result_len, out);
             free(message);
         }
         else
             break;
-    } while (1);
+    } while (!eocf);
     reset_dict();
 }
 
@@ -152,12 +160,12 @@ char *lzw_decrypt(int *buff, FILE *from_arch, int amount) {
     int i = 0, k = 0;
     if (dict[256] == NULL) // checking wether decrypting first batch
         concat_r(result, dict[buff[i]]);
-    while (i < amount - 1 && i < BUFF_SIZE) // TODO: is BUFF_SIZE really necessary?
+    while (i < amount - 1 && i < BUFF_SIZE && !eocf) // TODO: is BUFF_SIZE really necessary?
     {
         int *seq = malloc(sizeof(int) * BUFF_SIZE);
         seq_len = 0; seq[seq_len] = 256; k = 0;
         concat_s(seq, dict[buff[i++]]);
-        while (1)
+        while (buff[i] != 256 + dict_extended_len + 1)
         {
             if (!dict[buff[i]])
                 append(seq, seq[0]);
@@ -176,6 +184,12 @@ char *lzw_decrypt(int *buff, FILE *from_arch, int amount) {
             }
             else
                 i++;
+        }
+        if (buff[i] == 256 + dict_extended_len + 1)
+        {
+            eocf = 1;
+            if (amount > i + 1)
+                fseek(from_arch, -(amount - (i + 1))*sizeof(buff[0]), SEEK_CUR);
         }
     }
     if (i == BUFF_SIZE - 2)
@@ -205,7 +219,7 @@ void init_dict()
     }
 }
 
-void append_dict(int *seq_address) // TODO: add seq compression
+void append_dict(int *seq_address) // TODO: add seq trimming
 {
     if (256 + dict_extended_len + 1 >= dict_size)
     {
