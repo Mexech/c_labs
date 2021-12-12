@@ -4,51 +4,7 @@
 #include <strsafe.h>
 #pragma comment(lib, "User32.lib")
 
-int ListDirectoryContents(const wchar_t *sDir)
-{
-    WIN32_FIND_DATA fdFile;
-    HANDLE hFind = NULL;
 
-    wchar_t sPath[2048];
-
-    // Specify a file mask. *.* = We want everything!
-    StringCchCopy(szDir, MAX_PATH, argv[1]);
-    StringCchCat(szDir, MAX_PATH, TEXT("\\*"));
-    wsprintf(sPath, L"%s\\*.*", sDir);
-
-    if ((hFind = FindFirstFile(sPath, &fdFile)) == INVALID_HANDLE_VALUE)
-    {
-        wprintf(L"Path not found: [%s]\n", sDir);
-        return 0;
-    }
-
-    do
-    {
-        // Find first file will always return "."
-        //     and ".." as the first two directories.
-        if (wcscmp(fdFile.cFileName, L".") != 0 && wcscmp(fdFile.cFileName, L"..") != 0)
-        {
-            // Build up our file path using the passed in
-            //   [sDir] and the file/foldername we just found:
-            wsprintf(sPath, L"%s\\%s", sDir, fdFile.cFileName);
-
-            // Is the entity a File or Folder?
-            if (fdFile.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)
-            {
-                wprintf(L"Directory: %s\n", sPath);
-                ListDirectoryContents(sPath); // Recursion, I love it!
-            }
-            else
-            {
-                wprintf(L"File: %s\n", sPath);
-            }
-        }
-    } while (FindNextFile(hFind, &fdFile)); // Find the next file.
-
-    FindClose(hFind); // Always, Always, clean things up!
-
-    return 1;
-}
 
 int _tmain(int argc, TCHAR *argv[])
 {
@@ -58,7 +14,7 @@ int _tmain(int argc, TCHAR *argv[])
     size_t length_of_arg;
     HANDLE hFind = INVALID_HANDLE_VALUE;
     DWORD dwError = 0;
-    argv[1] = "F:\\Projects\\c_labs\\zapper";
+    argv[1] = "F:\\Projects\\c_labs";
     // If the directory is not specified as a command-line argument,
     // print usage.
 

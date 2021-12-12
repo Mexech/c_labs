@@ -1,19 +1,27 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <dirent.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
-#define BUFF_SIZE 81
+#define PATHS_AMOUNT 1024
+#define PATH_SIZE 1024
+#define BUFF_SIZE 8192
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
 
 int dict_extended_len = 0;
 int seq_len = 0;
+int paths_len = 0;
 int result_len = 0;
 int i_m = 0;
 int eocf = 0;
 int dict_size = INIT_DICT_SIZE;
 
 int **dict;
+char **paths;
 
 int in_dict(int *seq);
 int dict_index(int *seq);
@@ -32,23 +40,187 @@ void concat_r(char *res, int *seq);
 void concat_s(int *seq1, int *seq2);
 int len(int *seq);
 
+char *origin_folder(char *path)
+{
+    char *origin = calloc(PATH_SIZE, 1);
+    int i = strlen(path), j = 0;
+    while (((origin[j++] = path[--i]) != '/') && (origin[j - 1] != '\\'));
+    i = 0;
+    while (i < j / 2)
+    {
+        char t = origin[j - i - 1];
+        origin[j - i - 1] = origin[i];
+        origin[i++] = t;
+    }
+    return origin;
+}
+
+char *strremove(char *str, const char *sub)
+{
+    char *p, *q, *r;
+    if (*sub && (q = r = strstr(str, sub)) != NULL)
+    {
+        size_t len = strlen(sub);
+        while ((r = strstr(p = r + len, sub)) != NULL)
+        {
+            while (p < r)
+                *q++ = *p++;
+        }
+        while ((*q++ = *p++) != '\0')
+            continue;
+    }
+    return str;
+}
+
+int is_regular_file(const char *path)
+{
+    struct stat path_stat;
+    stat(path, &path_stat);
+    return S_ISREG(path_stat.st_mode);
+}
+
+void paths2file(char *origin)
+{
+    FILE *paths_file = fopen("paths.tmp", "wb+");
+    for (int i = 0; i < paths_len; i++)
+    {
+        char *path = calloc(PATH_SIZE, 1);
+        strcpy(path, paths[i]);
+        fprintf(paths_file, strcat(strcat(origin_folder(origin), strremove(path, origin)), "\n"));
+        free(path);
+    }
+    fclose(paths_file);
+}
+
+void fill_paths(const char *name)
+{
+    DIR *dir;
+    struct dirent *entry;
+
+    if (!(dir = opendir(name)))
+        return;
+
+    while ((entry = readdir(dir)) != NULL)
+    {
+        char *path = calloc(PATH_SIZE, sizeof(char));
+        strcpy(path, name);
+        snprintf(path, PATH_SIZE, "%s/%s", name, entry->d_name);
+        if (is_regular_file(path))
+        {
+            // printf(path);
+            // printf("\n");
+            paths[paths_len++] = path;
+        }
+        else
+        {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+                continue;
+            // printf(path);
+            // printf("\n");
+            fill_paths(path);
+        }
+    }
+    closedir(dir);
+}
+
+void process_paths(char *prefix)
+{
+    FILE *paths_file = fopen("paths.tmp", "rb");
+    char c;
+    int i = strlen(prefix);
+    char *path = calloc(PATH_SIZE, sizeof(char));
+    strcpy(path, prefix);
+    while ((c = fgetc(paths_file)) != EOF)
+    {
+        if (c == '\n')
+        {
+            i = strlen(prefix);
+            paths[paths_len++] = path;
+            path = calloc(PATH_SIZE, sizeof(char));
+            strcpy(path, prefix);
+        }
+        else
+            path[i++] = c;
+    }
+    fclose(paths_file);
+    remove("paths.tmp");
+}
+
+char *without_filename(char *path)
+{
+    char *result = calloc(PATH_SIZE, 1);
+    strcpy(result, path);
+    int j = strlen(result) - 1;
+    while (result[j--] = 0, (result[j] != '/') && (result[j] != '\\'));
+    for (int i = 0; i < strlen(result); i++)
+        if (result[i] == '/')
+            result[i] = '\\';
+    return result;
+}
+
 int main()
 {
+    paths = malloc(PATHS_AMOUNT * sizeof(char *));
+    char *path_to_encrypt = "C:/Users/maksp/Desktop/test";
+    char *path_to_decrypt = calloc(PATH_SIZE, 1);
+    strcpy(path_to_decrypt, "C:/Users/maksp/Desktop/Decrypted");
+    if (is_regular_file(path_to_encrypt))
+        paths[paths_len++] = path_to_encrypt;
+    else
+        fill_paths(path_to_encrypt);
     init_dict();
+
     FILE *out = fopen("out.zap", "wb+");
-    if (out == NULL)
-        perror("nonexistant output file");
-    lzw_encrypt_file("in1.txt", out);
-    lzw_encrypt_file("in2.txt", out);
-    lzw_encrypt_file("in3.txt", out);
+    paths2file(path_to_encrypt);
+    lzw_encrypt_file("paths.tmp", out);
+    remove("paths.tmp");
+    for (int i = 0; i < paths_len; i++)
+    {
+        lzw_encrypt_file(paths[i], out);
+        free(paths[i]);
+    }
+    free(paths);
+    paths = malloc(PATHS_AMOUNT * sizeof(char *));
+    paths_len = 0;
     fclose(out);
+    
     FILE *in = fopen("out.zap", "rb+");
     if (in == NULL)
         perror("nonexistant output file");
-    lzw_decrypt_file("decrypted1.txt", in);
-    lzw_decrypt_file("decrypted2.txt", in);
-    lzw_decrypt_file("decrypted3.txt", in);
+    lzw_decrypt_file("paths.tmp", in);
+    process_paths(path_to_decrypt);
+    for (int i = 0; i < paths_len; i++)
+    {
+        lzw_decrypt_file(paths[i], in);
+        free(paths[i]);
+    }
+    free(paths);
+    paths_len = 0;
     return 0;
+}
+
+char *pack(int *message)
+{
+    char *buff = calloc(i_m*4, sizeof(char));
+    int j = 0, shift = 0;
+    message[0] = 40034;
+    while ((buff[j++] = (message[0] >> (8 * j)) & 0xff) != 0);
+    while (((buff[j-2] << ++shift) & 0x80) != 128);
+    buff[j-2] = buff[j-2] << shift;
+    for (int i = j - 2; i < i_m; i++)
+    {
+        j = 0;
+        while (buff[i + j] != 0)
+        {
+            buff[i + j] = buff[i + j] | ((message[i] >> (8 * j)) & ((1 << shift) - 1));
+            message[i] = message[i] >> shift;
+            shift = 0;
+            j++;
+        }
+        // while (((buff[j - 2] << ++shift) & 0x80) != 128);
+        buff[j - 2] = buff[j - 2] << shift;
+    }
+    return buff;
 }
 
 void lzw_encrypt_file(char *path, FILE *to_arch)
@@ -58,6 +230,11 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
     fseek(in, 0L, SEEK_END);
     int sz = ftell(in);
     fseek(in, 0, SEEK_SET);
+    if (sz == 0)
+    {
+        int message[] = {256};
+        fwrite(message, sizeof(int), 1, to_arch);
+    }
     if (in == NULL)
         perror("nonexistant input file");
     do
@@ -73,9 +250,11 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
             fwrite(message, sizeof(message[0]), i_m, to_arch);
             free(message);
         }
-        else
+        else            
             break;
+
     } while (1);
+    fclose(in);
     reset_dict();
 }
 
@@ -113,11 +292,20 @@ int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
 void lzw_decrypt_file(char *path, FILE *from_arch)
 {
     int buff[BUFF_SIZE] = {0};
+    if (paths_len) 
+    {
+        char *command = calloc(PATH_SIZE, 1);
+        strcpy(command, "mkdir \"");
+        strcat(command, without_filename(path));
+        strcat(command, "\" >nul 2>nul");
+        system(command);
+    }
     eocf = 0;
     FILE *out = fopen(path, "wb+");
+    // int cur = ftell(from_arch);
     // fseek(from_arch, 0L, SEEK_END);
     // int sz = ftell(from_arch);
-    // fseek(from_arch, 0, SEEK_SET);
+    // fseek(from_arch, cur, SEEK_SET);
     if (out == NULL)
         perror("nonexistant input file");
     do
@@ -134,6 +322,7 @@ void lzw_decrypt_file(char *path, FILE *from_arch)
         else
             break;
     } while (!eocf);
+    fclose(out);
     reset_dict();
 }
 
@@ -159,8 +348,16 @@ char *lzw_decrypt(int *buff, FILE *from_arch, int amount) {
     char *result = calloc(result_cap, sizeof(char));
     int i = 0, k = 0;
     if (dict[256] == NULL) // checking wether decrypting first batch
-        concat_r(result, dict[buff[i]]);
-    while (i < amount - 1 && i < BUFF_SIZE && !eocf) // TODO: is BUFF_SIZE really necessary?
+    {
+        if (buff[0] == 256) // if file empty
+        {
+            eocf = 1;
+            fseek(from_arch, -(amount - (i + 1)) * sizeof(buff[0]), SEEK_CUR);
+        } 
+        else
+            concat_r(result, dict[buff[i]]);
+    } 
+    while (i < amount - 1 && i < BUFF_SIZE && !eocf)
     {
         int *seq = malloc(sizeof(int) * BUFF_SIZE);
         seq_len = 0; seq[seq_len] = 256; k = 0;
