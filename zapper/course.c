@@ -12,6 +12,11 @@
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
 
+FILE *arch;
+
+int bit_counter = 0;
+unsigned char cur_byte = 0;
+int cur_byte_number = 0;
 int dict_extended_len = 0;
 int seq_len = 0;
 int paths_len = 0;
@@ -26,9 +31,9 @@ char **paths;
 int in_dict(int *seq);
 int dict_index(int *seq);
 void fill_dict(char *dict);
-int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount);
-void lzw_encrypt_file(char *path, FILE *to_arch);
-char *lzw_decrypt(int *buff, FILE *from_arch, int amount);
+void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount);
+void lzw_encrypt_file(char *path);
+char *lzw_decrypt(char *buff, FILE *from_arch, int amount);
 void lzw_decrypt_file(char *path, FILE *from_arch);
 void append_dict(int *seq_address);
 void reset_dict();
@@ -161,37 +166,48 @@ char *without_filename(char *path)
 int main()
 {
     paths = malloc(PATHS_AMOUNT * sizeof(char *));
-    char *path_to_encrypt = "C:/Users/maksp/Desktop/test";
+    char *path_to_encrypt = calloc(PATH_SIZE, 1);
+    strcpy(path_to_encrypt, "F:\\Projects\\c_labs\\zapper\\rofl.jpg");
     char *path_to_decrypt = calloc(PATH_SIZE, 1);
-    strcpy(path_to_decrypt, "C:/Users/maksp/Desktop/Decrypted");
+    strcpy(path_to_decrypt, "C:\\Users\\maksp\\Desktop");
     if (is_regular_file(path_to_encrypt))
         paths[paths_len++] = path_to_encrypt;
     else
         fill_paths(path_to_encrypt);
     init_dict();
 
-    FILE *out = fopen("out.zap", "wb+");
+    arch = fopen("out.zap", "wb+");
     paths2file(path_to_encrypt);
-    lzw_encrypt_file("paths.tmp", out);
+    lzw_encrypt_file("paths.tmp");
     remove("paths.tmp");
     for (int i = 0; i < paths_len; i++)
     {
-        lzw_encrypt_file(paths[i], out);
+        lzw_encrypt_file(paths[i]);
         free(paths[i]);
     }
+    if (bit_counter > 0)
+    {
+        // for (int i = 0; i < 8 - bit_counter; i++)
+        //     printf("0");
+        // printf("\n");
+        cur_byte <<= 8 - bit_counter;
+        fwrite(&cur_byte, 1, 1, arch);
+        bit_counter = 0;
+    }
+    // printf("\n");
     free(paths);
     paths = malloc(PATHS_AMOUNT * sizeof(char *));
     paths_len = 0;
-    fclose(out);
+    fclose(arch);
     
-    FILE *in = fopen("out.zap", "rb+");
-    if (in == NULL)
+    FILE *arch = fopen("out.zap", "rb+");
+    if (arch == NULL)
         perror("nonexistant output file");
-    lzw_decrypt_file("paths.tmp", in);
+    lzw_decrypt_file("paths.tmp", arch);
     process_paths(path_to_decrypt);
     for (int i = 0; i < paths_len; i++)
     {
-        lzw_decrypt_file(paths[i], in);
+        lzw_decrypt_file(paths[i], arch);
         free(paths[i]);
     }
     free(paths);
@@ -199,31 +215,77 @@ int main()
     return 0;
 }
 
-char *pack(int *message)
+void write_bit(unsigned char bit)
 {
-    char *buff = calloc(i_m*4, sizeof(char));
-    int j = 0, shift = 0;
-    message[0] = 40034;
-    while ((buff[j++] = (message[0] >> (8 * j)) & 0xff) != 0);
-    while (((buff[j-2] << ++shift) & 0x80) != 128);
-    buff[j-2] = buff[j-2] << shift;
-    for (int i = j - 2; i < i_m; i++)
+    cur_byte <<= 1;
+    cur_byte |= bit;
+    if (++bit_counter == 8)
     {
-        j = 0;
-        while (buff[i + j] != 0)
-        {
-            buff[i + j] = buff[i + j] | ((message[i] >> (8 * j)) & ((1 << shift) - 1));
-            message[i] = message[i] >> shift;
-            shift = 0;
-            j++;
-        }
-        // while (((buff[j - 2] << ++shift) & 0x80) != 128);
-        buff[j - 2] = buff[j - 2] << shift;
+        fwrite(&cur_byte, 1, 1, arch);
+        bit_counter = 0;
+        cur_byte = 0;
+        // printf("\n");
     }
-    return buff;
 }
 
-void lzw_encrypt_file(char *path, FILE *to_arch)
+int count_bits(int number)
+{
+    int i = 0;
+    while (i++, (number >>= 1) != 0);
+    return i;
+}
+
+void write_as_bits(unsigned int number)
+{
+    if (number >> 1)
+    {
+        write_as_bits(number >> 1);
+    }
+    // printf("%d", number & 1);
+    write_bit(number & 1);
+}
+
+void pack(int code)
+{
+    int prefix_zeros = count_bits(256 + dict_extended_len) - count_bits(code);
+    for (int i = 0; i < prefix_zeros; i++)
+    {
+        // printf("0");
+        write_bit(0);
+    }
+    write_as_bits(code);
+}
+
+unsigned char read_next_bit(char *buff)
+{
+    
+    // if (!bit_counter && cur_byte_number)
+    //     printf("\n");
+    int bit = ((buff[cur_byte_number] << bit_counter++) & 128) >> 7;
+    // printf("%d", bit);
+    if (bit_counter == 8)
+    {
+        if (cur_byte_number == BUFF_SIZE - 2)
+            buff[cur_byte_number] = fgetc(arch);
+        else
+            cur_byte_number++;
+        bit_counter = 0;
+    }
+    return bit;
+}
+
+int unpack(char *buff)
+{
+    int result = 0;
+    int bits_to_read = count_bits(257 + dict_extended_len);
+    for (int i = bits_to_read - 1; i >= 0; i--)
+    {
+        result += (1 << i) * read_next_bit(buff);
+    }
+    return result;
+}
+
+void lzw_encrypt_file(char *path)
 {
     unsigned char buff[BUFF_SIZE] = {0};
     FILE *in = fopen(path, "rb");
@@ -231,10 +293,7 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
     int sz = ftell(in);
     fseek(in, 0, SEEK_SET);
     if (sz == 0)
-    {
-        int message[] = {256};
-        fwrite(message, sizeof(int), 1, to_arch);
-    }
+        pack(256);
     if (in == NULL)
         perror("nonexistant input file");
     do
@@ -244,11 +303,9 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
         sz -= n;
         if (n)
         {
-            int *message = lzw_encrypt(buff, in, n);
+            lzw_encrypt(buff, in, n);
             if (n < BUFF_SIZE)
-                message[i_m++] = 256 + dict_extended_len;
-            fwrite(message, sizeof(message[0]), i_m, to_arch);
-            free(message);
+                pack(256 + dict_extended_len);
         }
         else            
             break;
@@ -258,9 +315,8 @@ void lzw_encrypt_file(char *path, FILE *to_arch)
     reset_dict();
 }
 
-int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
+void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
 {
-    int *result = calloc(BUFF_SIZE, sizeof(int));
     int i = 0, last = 0;
     i_m = 0;
     while (i < amount && i < BUFF_SIZE)
@@ -275,7 +331,8 @@ int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
             {
                 last = seq[--seq_len];
                 seq[seq_len] = 256;
-                result[i_m++] = dict_index(seq);
+                pack(dict_index(seq));
+                // result[i_m++] = dict_index(seq);
                 append(seq, last);
                 append_dict(seq);
                 break;
@@ -286,12 +343,12 @@ int *lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
     }
     if (i >= amount)
         ungetc(last, from_file);
-    return result;
 }
 
 void lzw_decrypt_file(char *path, FILE *from_arch)
 {
-    int buff[BUFF_SIZE] = {0};
+    char buff[BUFF_SIZE] = {0};
+    cur_byte_number = 0;
     if (paths_len) 
     {
         char *command = calloc(PATH_SIZE, 1);
@@ -322,6 +379,7 @@ void lzw_decrypt_file(char *path, FILE *from_arch)
         else
             break;
     } while (!eocf);
+    // printf("\n");
     fclose(out);
     reset_dict();
 }
@@ -342,55 +400,59 @@ void concat_s(int *seq1, int *seq2)
     seq_len = l1;
 }
 
-char *lzw_decrypt(int *buff, FILE *from_arch, int amount) {
+char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
     int result_cap = RESULT_SIZE;
     result_len = 0;
     char *result = calloc(result_cap, sizeof(char));
-    int i = 0, k = 0;
+    int i = 0, k = 0, code;
     if (dict[256] == NULL) // checking wether decrypting first batch
     {
-        if (buff[0] == 256) // if file empty
+        code = unpack(buff);
+        // printf("%d\n", code);
+        if (code == 256 && cur_byte_number == 1) // if file empty
         {
             eocf = 1;
-            fseek(from_arch, -(amount - (i + 1)) * sizeof(buff[0]), SEEK_CUR);
+            fseek(from_arch, -(amount - cur_byte_number) * sizeof(buff[0]), SEEK_CUR);
         } 
         else
-            concat_r(result, dict[buff[i]]);
+            concat_r(result, dict[code]);
     } 
-    while (i < amount - 1 && i < BUFF_SIZE && !eocf)
+    while (cur_byte_number < amount && cur_byte_number < BUFF_SIZE && !eocf)
     {
         int *seq = malloc(sizeof(int) * BUFF_SIZE);
         seq_len = 0; seq[seq_len] = 256; k = 0;
-        concat_s(seq, dict[buff[i++]]);
-        while (buff[i] != 256 + dict_extended_len + 1)
+        concat_s(seq, dict[code]);
+        code = unpack(buff);
+        // printf("%d\n", code);
+        while (code != 256 + dict_extended_len + 1)
         {
-            if (!dict[buff[i]])
+            if (!dict[code])
                 append(seq, seq[0]);
             else
-                append(seq, dict[buff[i]][k++]);
+                append(seq, dict[code][k++]);
             if (!in_dict(seq))
             {
                 append_dict(seq);
-                if (result_len + len(dict[buff[i]]) + 1 >= result_cap)
+                if (result_len + len(dict[code]) + 1 >= result_cap)
                 {
                     result_cap *= 1.5;
                     result = realloc(result, result_cap);
                 }
-                concat_r(result, dict[buff[i]]);
+                concat_r(result, dict[code]);
                 break;
             }
-            else
-                i++;
         }
-        if (buff[i] == 256 + dict_extended_len + 1)
+        if (code == 256 + dict_extended_len + 1)
         {
             eocf = 1;
-            if (amount > i + 1)
-                fseek(from_arch, -(amount - (i + 1))*sizeof(buff[0]), SEEK_CUR);
+            if (amount > cur_byte_number)
+            {
+                fseek(from_arch, -(amount - cur_byte_number)*sizeof(buff[0]), SEEK_CUR);
+            }
         }
     }
-    if (i == BUFF_SIZE - 2)
-        fseek(from_arch, -sizeof(buff[0]), SEEK_CUR);
+    // if (cur_byte_number == BUFF_SIZE - 2)
+    //     fseek(from_arch, -sizeof(buff[0]), SEEK_CUR);
     return result;
 }
 
@@ -497,3 +559,65 @@ int len(int *seq)
     while (seq[i++] != 256);
     return i - 1;
 }
+
+/*
+
+int unpack(unsigned char *buff)
+{
+    int bits = count_bits(256 + dict_extended_len);
+    int result = 0, i;
+    for (i = i_m; i < (bits / 8); i++)
+    {
+        result += buff[i] << (8 * i);
+    }
+    int mask;
+    if (bits % 8)
+    {
+        mask = (1 << (bits % 8)) - 1;
+        mask <<= (8 - (bits % 8));
+        last_byte = (buff[i] & mask) >> (8 - (bits % 8));
+        result += last_byte << ((bits / 8) * 8);
+    }
+    else
+        last_byte = buff[i-1];
+}
+
+void pack(char *result, int code)
+{
+    // code = 400007;
+    int bits_to_fill = count_bits(256 + dict_extended_len);
+    int prefix_zeros = bits_to_fill - count_bits(code) - (8 - count_bits(code & 0xff));
+    int left_over;
+    // last_byte = 6;
+    // result[i_m] = -64;
+    // int prefix_zeros = 3;
+    // FILE *f = fopen("out.zap", "wb+");
+    int j = 0;
+    if (prefix_zeros || last_bits)
+    {
+        int shift = prefix_zeros + last_bits;
+        int first_byte = (code & 0xff) >> shift;
+        result[i_m++] |= first_byte;
+        bits_to_fill -= 8;
+        if (!first_byte)
+        {
+            shift -= 8;
+            result[i_m++] = (code & 0xff) >> shift;
+            bits_to_fill -= count_bits(result[i_m-1]);
+            left_over = code & (0xff >> (8 - shift));
+        }
+        else
+            left_over = code & (0xff >> (8 - shift));
+        code >>= 8;
+        code <<= shift;
+        code |= left_over;
+    }
+    while ((result[i_m++] = (code >> (8 * j++)) & 0xff) != 0);
+    i_m -= 1;
+    last_bits = bits_to_fill;
+    if (!(!left_over && bits_to_fill))
+        while (result[i_m-1] <<= 1, (result[i_m-1] & 0x80) != 128);
+    // fwrite(result, 1, i_m + 1, f);
+    // fclose(f);
+}
+*/
