@@ -11,6 +11,8 @@
 #define BUFF_SIZE 8192
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
+#define MAX_DICT_LEN 20480
+#define INIT_ALPH_LEN 257
 
 FILE *arch;
 
@@ -167,9 +169,10 @@ int main()
 {
     paths = malloc(PATHS_AMOUNT * sizeof(char *));
     char *path_to_encrypt = calloc(PATH_SIZE, 1);
-    strcpy(path_to_encrypt, "F:\\Projects\\c_labs\\zapper\\rofl.jpg");
+    // strcpy(path_to_encrypt, "F:\\Projects\\c_labs\\zapper\\working.exe");
+    strcpy(path_to_encrypt, "C:\\Users\\maksp\\Desktop\\test");
     char *path_to_decrypt = calloc(PATH_SIZE, 1);
-    strcpy(path_to_decrypt, "C:\\Users\\maksp\\Desktop");
+    strcpy(path_to_decrypt, "C:\\Users\\maksp\\Desktop\\decrypted");
     if (is_regular_file(path_to_encrypt))
         paths[paths_len++] = path_to_encrypt;
     else
@@ -247,7 +250,7 @@ void write_as_bits(unsigned int number)
 
 void pack(int code)
 {
-    int prefix_zeros = count_bits(256 + dict_extended_len) - count_bits(code);
+    int prefix_zeros = count_bits(INIT_ALPH_LEN + dict_extended_len + 1) - count_bits(code);
     for (int i = 0; i < prefix_zeros; i++)
     {
         // printf("0");
@@ -277,10 +280,15 @@ unsigned char read_next_bit(char *buff)
 int unpack(char *buff)
 {
     int result = 0;
-    int bits_to_read = count_bits(257 + dict_extended_len);
+    int bits_to_read = count_bits(INIT_ALPH_LEN + dict_extended_len + 2);
     for (int i = bits_to_read - 1; i >= 0; i--)
     {
         result += (1 << i) * read_next_bit(buff);
+    }
+    if (result == 256)
+    {
+        reset_dict();
+        result = unpack(buff);
     }
     return result;
 }
@@ -293,7 +301,7 @@ void lzw_encrypt_file(char *path)
     int sz = ftell(in);
     fseek(in, 0, SEEK_SET);
     if (sz == 0)
-        pack(256);
+        pack(257);
     if (in == NULL)
         perror("nonexistant input file");
     do
@@ -305,7 +313,7 @@ void lzw_encrypt_file(char *path)
         {
             lzw_encrypt(buff, in, n);
             if (n < BUFF_SIZE)
-                pack(256 + dict_extended_len);
+                pack(257);
         }
         else            
             break;
@@ -332,7 +340,6 @@ void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
                 last = seq[--seq_len];
                 seq[seq_len] = 256;
                 pack(dict_index(seq));
-                // result[i_m++] = dict_index(seq);
                 append(seq, last);
                 append_dict(seq);
                 break;
@@ -404,12 +411,12 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
     int result_cap = RESULT_SIZE;
     result_len = 0;
     char *result = calloc(result_cap, sizeof(char));
-    int i = 0, k = 0, code;
-    if (dict[256] == NULL) // checking wether decrypting first batch
+    int k = 0, code;
+    if (dict[INIT_ALPH_LEN + 1] == NULL) // checking wether decrypting first batch
     {
         code = unpack(buff);
         // printf("%d\n", code);
-        if (code == 256 && cur_byte_number == 1) // if file empty
+        if (code == 257) // if file empty
         {
             eocf = 1;
             fseek(from_arch, -(amount - cur_byte_number) * sizeof(buff[0]), SEEK_CUR);
@@ -424,7 +431,7 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
         concat_s(seq, dict[code]);
         code = unpack(buff);
         // printf("%d\n", code);
-        while (code != 256 + dict_extended_len + 1)
+        while (code != 257)
         {
             if (!dict[code])
                 append(seq, seq[0]);
@@ -442,7 +449,7 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
                 break;
             }
         }
-        if (code == 256 + dict_extended_len + 1)
+        if (code == 257)
         {
             eocf = 1;
             if (amount > cur_byte_number)
@@ -458,8 +465,9 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
 
 void reset_dict()
 {
-    for (int i = 0; i < 256 + dict_extended_len; i++)
-        free(dict[i]);
+    for (int i = 0; i < INIT_ALPH_LEN + dict_extended_len + 1; i++)
+        if ((i != 256) && (i != 257))
+            free(dict[i]);
     free(dict);
     dict_size = INIT_DICT_SIZE;
     dict_extended_len = 0;
@@ -480,30 +488,36 @@ void init_dict()
 
 void append_dict(int *seq_address) // TODO: add seq trimming
 {
-    if (256 + dict_extended_len + 1 >= dict_size)
+    if (INIT_ALPH_LEN + dict_extended_len + 2 >= MAX_DICT_LEN)
+    {
+        if (!cur_byte_number)
+            pack(256);
+        reset_dict();
+    } 
+    else if (INIT_ALPH_LEN + dict_extended_len + 2 >= dict_size)
     {
         dict_size *= 1.5;
         dict = realloc(dict, dict_size * sizeof(int *));
     }
-    dict[256 + dict_extended_len++] = seq_address;
-    dict[256 + dict_extended_len] = NULL;
+    dict[INIT_ALPH_LEN + 1 + dict_extended_len++] = seq_address;
+    dict[INIT_ALPH_LEN + 1 + dict_extended_len] = NULL;
 }
 
 int in_dict(int *seq)
 {
-    int k;
-    for (int k = 255 + dict_extended_len; k >= 0; k--)
-        if (streq(dict[k], seq))
-            return 1;
+    for (int k = INIT_ALPH_LEN + dict_extended_len; k >= 0; k--)
+        if ((k != 256) && (k != 257)) 
+            if (streq(dict[k], seq))
+                return 1;
     return 0;
 }
 
 int dict_index(int *seq)
 {
-    int k;
-    for (k = 255 + dict_extended_len; k >= 0; k--)
-        if (streq(dict[k], seq))
-            return k;
+    for (int k = INIT_ALPH_LEN + dict_extended_len; k >= 0; k--)
+        if ((k != 256) && (k != 257))
+            if (streq(dict[k], seq))
+                return k;
 }
 
 void fill_dict(char *dict) {
@@ -559,65 +573,3 @@ int len(int *seq)
     while (seq[i++] != 256);
     return i - 1;
 }
-
-/*
-
-int unpack(unsigned char *buff)
-{
-    int bits = count_bits(256 + dict_extended_len);
-    int result = 0, i;
-    for (i = i_m; i < (bits / 8); i++)
-    {
-        result += buff[i] << (8 * i);
-    }
-    int mask;
-    if (bits % 8)
-    {
-        mask = (1 << (bits % 8)) - 1;
-        mask <<= (8 - (bits % 8));
-        last_byte = (buff[i] & mask) >> (8 - (bits % 8));
-        result += last_byte << ((bits / 8) * 8);
-    }
-    else
-        last_byte = buff[i-1];
-}
-
-void pack(char *result, int code)
-{
-    // code = 400007;
-    int bits_to_fill = count_bits(256 + dict_extended_len);
-    int prefix_zeros = bits_to_fill - count_bits(code) - (8 - count_bits(code & 0xff));
-    int left_over;
-    // last_byte = 6;
-    // result[i_m] = -64;
-    // int prefix_zeros = 3;
-    // FILE *f = fopen("out.zap", "wb+");
-    int j = 0;
-    if (prefix_zeros || last_bits)
-    {
-        int shift = prefix_zeros + last_bits;
-        int first_byte = (code & 0xff) >> shift;
-        result[i_m++] |= first_byte;
-        bits_to_fill -= 8;
-        if (!first_byte)
-        {
-            shift -= 8;
-            result[i_m++] = (code & 0xff) >> shift;
-            bits_to_fill -= count_bits(result[i_m-1]);
-            left_over = code & (0xff >> (8 - shift));
-        }
-        else
-            left_over = code & (0xff >> (8 - shift));
-        code >>= 8;
-        code <<= shift;
-        code |= left_over;
-    }
-    while ((result[i_m++] = (code >> (8 * j++)) & 0xff) != 0);
-    i_m -= 1;
-    last_bits = bits_to_fill;
-    if (!(!left_over && bits_to_fill))
-        while (result[i_m-1] <<= 1, (result[i_m-1] & 0x80) != 128);
-    // fwrite(result, 1, i_m + 1, f);
-    // fclose(f);
-}
-*/
