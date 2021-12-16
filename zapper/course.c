@@ -11,7 +11,7 @@
 #define BUFF_SIZE 8192
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
-#define MAX_DICT_LEN 20480
+#define MAX_DICT_LEN 1024000
 #define INIT_ALPH_LEN 257
 
 FILE *arch;
@@ -25,7 +25,10 @@ int paths_len = 0;
 int result_len = 0;
 int i_m = 0;
 int eocf = 0;
+int eob = 0;
 int dict_size = INIT_DICT_SIZE;
+int total_sz = 0;
+int buff_leftover = -1;
 
 int **dict;
 char **paths;
@@ -46,6 +49,24 @@ void append(int *seq, int c);
 void concat_r(char *res, int *seq);
 void concat_s(int *seq1, int *seq2);
 int len(int *seq);
+
+char *prettify(char *path)
+{
+    char *result = calloc(PATH_SIZE, 1);
+    char c, prev_c, i = 0, j = 0, found_slash = 0;
+    while ((c = path[i++]) != 0)
+        if (c != '\\' && c != '/')
+        {
+            result[j++] = c;
+            found_slash = 0;
+        }
+        else if (!found_slash)
+        {
+            result[j++] = '\\';
+            found_slash = 1;
+        }
+    return result;
+}
 
 char *origin_folder(char *path)
 {
@@ -86,6 +107,13 @@ int is_regular_file(const char *path)
     return S_ISREG(path_stat.st_mode);
 }
 
+int is_folder(const char *path)
+{
+    struct stat path_stat;
+    stat(path, &path_stat);
+    return S_ISDIR(path_stat.st_mode);
+}
+
 void paths2file(char *origin)
 {
     FILE *paths_file = fopen("paths.tmp", "wb+");
@@ -114,16 +142,12 @@ void fill_paths(const char *name)
         snprintf(path, PATH_SIZE, "%s/%s", name, entry->d_name);
         if (is_regular_file(path))
         {
-            // printf(path);
-            // printf("\n");
             paths[paths_len++] = path;
         }
         else
         {
             if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
                 continue;
-            // printf(path);
-            // printf("\n");
             fill_paths(path);
         }
     }
@@ -165,21 +189,18 @@ char *without_filename(char *path)
     return result;
 }
 
-int main()
+void make_archive(char *path_to_encrypt, char *output_path)
 {
-    paths = malloc(PATHS_AMOUNT * sizeof(char *));
-    char *path_to_encrypt = calloc(PATH_SIZE, 1);
-    // strcpy(path_to_encrypt, "F:\\Projects\\c_labs\\zapper\\working.exe");
-    strcpy(path_to_encrypt, "C:\\Users\\maksp\\Desktop\\test");
-    char *path_to_decrypt = calloc(PATH_SIZE, 1);
-    strcpy(path_to_decrypt, "C:\\Users\\maksp\\Desktop\\decrypted");
     if (is_regular_file(path_to_encrypt))
         paths[paths_len++] = path_to_encrypt;
     else
         fill_paths(path_to_encrypt);
     init_dict();
 
-    arch = fopen("out.zap", "wb+");
+    arch = fopen(output_path, "wb+");
+    fseek(arch, 0, SEEK_END);
+    total_sz = ftell(arch);
+    fseek(arch, 0, SEEK_SET);
     paths2file(path_to_encrypt);
     lzw_encrypt_file("paths.tmp");
     remove("paths.tmp");
@@ -190,24 +211,27 @@ int main()
     }
     if (bit_counter > 0)
     {
-        // for (int i = 0; i < 8 - bit_counter; i++)
-        //     printf("0");
-        // printf("\n");
         cur_byte <<= 8 - bit_counter;
         fwrite(&cur_byte, 1, 1, arch);
         bit_counter = 0;
     }
-    // printf("\n");
     free(paths);
     paths = malloc(PATHS_AMOUNT * sizeof(char *));
     paths_len = 0;
     fclose(arch);
-    
-    FILE *arch = fopen("out.zap", "rb+");
+}
+
+void extract_archive(char *path_to_decrypt, char *output_path)
+{
+    init_dict();
+    arch = fopen(path_to_decrypt, "rb+");
     if (arch == NULL)
         perror("nonexistant output file");
+    fseek(arch, 0, SEEK_END);
+    total_sz = ftell(arch);
+    fseek(arch, 0, SEEK_SET);
     lzw_decrypt_file("paths.tmp", arch);
-    process_paths(path_to_decrypt);
+    process_paths(output_path);
     for (int i = 0; i < paths_len; i++)
     {
         lzw_decrypt_file(paths[i], arch);
@@ -215,6 +239,91 @@ int main()
     }
     free(paths);
     paths_len = 0;
+}
+
+char *filename_no_ext(char *path)
+{
+    char *result = calloc(_MAX_PATH, 1);
+    strcpy(result, path);
+    strremove(result, without_filename(result));
+    if (is_folder(path))
+        return result;
+    else 
+    {
+        int i = strlen(result);
+        while (--i != 0)
+            if (result[i] == '.')
+            {
+                result[i] = 0;
+                break;
+            }
+            else if (result[i] == '\\' || result[i] == '/')
+                break;
+        return result;
+    }
+}
+
+int main(int argc, char *argv[])
+{
+    setbuf(stdout, NULL);
+    paths = malloc(PATHS_AMOUNT * sizeof(char *));
+    if (argc > 1)
+    {
+        char *extension = calloc(4, 1);
+        char *output_path = calloc(PATH_SIZE, 1);
+        if (!is_folder(argv[1]) && !is_regular_file(argv[1]))
+        {
+            printf("Input path does not exist");
+            exit(0);
+        }
+        if (argc == 3)
+        {
+            if (is_regular_file(argv[2]))
+            {
+                printf("Output folder path cannot be path to file\n");
+                exit(0);
+            }
+            else if (!is_folder(argv[2]))
+            {
+                char c;
+                printf("Output folder cannot be found, create it?(Y/N)\n");
+                scanf("%c", &c);
+                if (c == 'Y' || c == 'y')
+                {
+                    char *command = calloc(PATH_SIZE, 1);
+                    sprintf(command, "mkdir \"%s\"", argv[2]);
+                    system(command);
+                    if (!is_folder(argv[2]))
+                        exit(0);
+                }
+                else if (c == 'N' || c == 'n')
+                    exit(0);
+            }
+            strcpy(output_path, argv[2]);
+        }
+        else
+            strcpy(output_path, without_filename(argv[1]));
+        sprintf(extension, "%.*s", 4, argv[1] + strlen(argv[1]) - 4);
+        if (!strcmp(extension, ".zap"))
+        {
+            extract_archive(argv[1], output_path);
+        }
+        else
+        {
+            sprintf(output_path, "%s/%s.zap", output_path, filename_no_ext(argv[1]));
+            while (access(output_path, F_OK) == 0)
+            {
+                char c;
+                printf("%s -- already exists, overwrite?(Y/N)\n", prettify(output_path));
+                scanf("%c", &c);
+                if (c == 'N' || c == 'n')
+                    sprintf(output_path, "%s/%s-(2).zap", argc == 3 ? without_filename(argv[2]) : without_filename(argv[1]), filename_no_ext(argv[1]));
+                else if (c == 'Y' || c == 'y')
+                    break;
+            }
+            make_archive(argv[1], output_path);
+        }
+    }
     return 0;
 }
 
@@ -227,7 +336,6 @@ void write_bit(unsigned char bit)
         fwrite(&cur_byte, 1, 1, arch);
         bit_counter = 0;
         cur_byte = 0;
-        // printf("\n");
     }
 }
 
@@ -244,7 +352,6 @@ void write_as_bits(unsigned int number)
     {
         write_as_bits(number >> 1);
     }
-    // printf("%d", number & 1);
     write_bit(number & 1);
 }
 
@@ -253,7 +360,6 @@ void pack(int code)
     int prefix_zeros = count_bits(INIT_ALPH_LEN + dict_extended_len + 1) - count_bits(code);
     for (int i = 0; i < prefix_zeros; i++)
     {
-        // printf("0");
         write_bit(0);
     }
     write_as_bits(code);
@@ -261,15 +367,14 @@ void pack(int code)
 
 unsigned char read_next_bit(char *buff)
 {
-    
-    // if (!bit_counter && cur_byte_number)
-    //     printf("\n");
     int bit = ((buff[cur_byte_number] << bit_counter++) & 128) >> 7;
-    // printf("%d", bit);
     if (bit_counter == 8)
     {
         if (cur_byte_number == BUFF_SIZE - 2)
+        {
             buff[cur_byte_number] = fgetc(arch);
+            eob = 1;
+        }
         else
             cur_byte_number++;
         bit_counter = 0;
@@ -290,6 +395,8 @@ int unpack(char *buff)
         reset_dict();
         result = unpack(buff);
     }
+    if (cur_byte_number == BUFF_SIZE - 2)
+        buff_leftover = result;
     return result;
 }
 
@@ -298,25 +405,29 @@ void lzw_encrypt_file(char *path)
     unsigned char buff[BUFF_SIZE] = {0};
     FILE *in = fopen(path, "rb");
     fseek(in, 0L, SEEK_END);
-    int sz = ftell(in);
+    int total_sz = ftell(in);
     fseek(in, 0, SEEK_SET);
-    if (sz == 0)
+    if (total_sz == 0)
         pack(257);
     if (in == NULL)
         perror("nonexistant input file");
+    if (strcmp(path, "paths.tmp"))
+        printf("Compressing %s\n", prettify(path));
     do
     {
         size_t n = fread(buff, sizeof(buff[0]), sizeof(buff), in);
-        printf("%d\n", sz);
-        sz -= n;
+        eocf = 0;
         if (n)
         {
             lzw_encrypt(buff, in, n);
-            if (n < BUFF_SIZE)
-                pack(257);
         }
-        else            
+        else if (n < BUFF_SIZE)
+        {
+            pack(257);
             break;
+        }
+        if (strcmp(path, "paths.tmp"))
+            printf("%.2f%%\n", ((float)ftell(in) / total_sz) * 100);
 
     } while (1);
     fclose(in);
@@ -339,6 +450,7 @@ void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
             {
                 last = seq[--seq_len];
                 seq[seq_len] = 256;
+                int t = dict_index(seq);
                 pack(dict_index(seq));
                 append(seq, last);
                 append_dict(seq);
@@ -355,7 +467,7 @@ void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
 void lzw_decrypt_file(char *path, FILE *from_arch)
 {
     char buff[BUFF_SIZE] = {0};
-    cur_byte_number = 0;
+    eocf = 0;
     if (paths_len) 
     {
         char *command = calloc(PATH_SIZE, 1);
@@ -364,19 +476,14 @@ void lzw_decrypt_file(char *path, FILE *from_arch)
         strcat(command, "\" >nul 2>nul");
         system(command);
     }
-    eocf = 0;
     FILE *out = fopen(path, "wb+");
-    // int cur = ftell(from_arch);
-    // fseek(from_arch, 0L, SEEK_END);
-    // int sz = ftell(from_arch);
-    // fseek(from_arch, cur, SEEK_SET);
     if (out == NULL)
         perror("nonexistant input file");
     do
     {
         size_t n = fread(buff, sizeof(buff[0]), BUFF_SIZE - 1, from_arch);
-        // printf("%d\n", sz);
-        // sz -= (n - 1)*sizeof(int);
+        cur_byte_number = 0;
+        eob = 0;
         if (n)
         {           
             char *message = lzw_decrypt(buff, from_arch, n);
@@ -385,8 +492,8 @@ void lzw_decrypt_file(char *path, FILE *from_arch)
         }
         else
             break;
+        printf("%.2f%%\n", ((float) ftell(from_arch) / total_sz) * 100);
     } while (!eocf);
-    // printf("\n");
     fclose(out);
     reset_dict();
 }
@@ -395,14 +502,14 @@ void concat_r(char *res, int *seq)
 {
     int i;
     for (i = 0; seq[i] != 256; i++)
-        res[result_len++] = seq[i];      // TODO: realloc here
+        res[result_len++] = seq[i];
 }
 
 void concat_s(int *seq1, int *seq2)
 {
     int l1 = len(seq1);
     for (int i = 0; seq2[i] != 256; i++)
-        seq1[l1++] = seq2[i];           // TODO: realloc here
+        seq1[l1++] = seq2[i];
     seq1[l1] = 256;
     seq_len = l1;
 }
@@ -411,11 +518,10 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
     int result_cap = RESULT_SIZE;
     result_len = 0;
     char *result = calloc(result_cap, sizeof(char));
-    int k = 0, code;
+    int k = 0, code = 0;
     if (dict[INIT_ALPH_LEN + 1] == NULL) // checking wether decrypting first batch
     {
         code = unpack(buff);
-        // printf("%d\n", code);
         if (code == 257) // if file empty
         {
             eocf = 1;
@@ -424,13 +530,17 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
         else
             concat_r(result, dict[code]);
     } 
-    while (cur_byte_number < amount && cur_byte_number < BUFF_SIZE && !eocf)
+    while (cur_byte_number < amount && cur_byte_number < BUFF_SIZE && !eocf && !eob)
     {
         int *seq = malloc(sizeof(int) * BUFF_SIZE);
         seq_len = 0; seq[seq_len] = 256; k = 0;
+        if (buff_leftover != -1)
+        {
+            code = buff_leftover;
+            buff_leftover = -1;
+        }
         concat_s(seq, dict[code]);
         code = unpack(buff);
-        // printf("%d\n", code);
         while (code != 257)
         {
             if (!dict[code])
@@ -448,6 +558,8 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
                 concat_r(result, dict[code]);
                 break;
             }
+            else if (dict[code][k] == 256)
+                break;
         }
         if (code == 257)
         {
@@ -458,8 +570,8 @@ char *lzw_decrypt(char *buff, FILE *from_arch, int amount) {
             }
         }
     }
-    // if (cur_byte_number == BUFF_SIZE - 2)
-    //     fseek(from_arch, -sizeof(buff[0]), SEEK_CUR);
+    if (eob)
+        fseek(from_arch, -sizeof(buff[0]), SEEK_CUR);
     return result;
 }
 
@@ -486,7 +598,7 @@ void init_dict()
     }
 }
 
-void append_dict(int *seq_address) // TODO: add seq trimming
+void append_dict(int *seq_address)
 {
     if (INIT_ALPH_LEN + dict_extended_len + 2 >= MAX_DICT_LEN)
     {
@@ -546,25 +658,6 @@ void append(int *seq, int c)
 {
     seq[seq_len++] = c;
     seq[seq_len] = 256;
-}
-
-void print_dict()
-{
-    printf("\n");
-    for (int i = 256; i < 256 + dict_extended_len; i++)
-    {
-        int k = 0;
-        print(dict[i]);
-        printf("\n");
-    }
-    printf("\n");
-}
-
-void print(int *seq)
-{
-    int k = 0;
-    while (seq[k] != 256)
-        printf("%d ", seq[k++]);
 }
 
 int len(int *seq)
