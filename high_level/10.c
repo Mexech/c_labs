@@ -8,12 +8,15 @@ int is_delimiter(int c)
 }
 
 // Вводится символ, которым заменяют разделители в файле
-void main() {
+void main(int argc, char **argv) {
   FILE *in, *out;
   char *replace_str;
   char replace_c;
   char c;
-  scanf("%s", replace_str);
+  if (argc <= 1)
+    return;
+  else
+    strcpy(replace_str, argv[1]);
   if (!strcmp("tab", replace_str))
     replace_c = '\t';
   else if (!strcmp("enter", replace_str))

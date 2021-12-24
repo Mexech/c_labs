@@ -11,7 +11,7 @@
 #define BUFF_SIZE 8192
 #define RESULT_SIZE 8192
 #define INIT_DICT_SIZE 1024
-#define MAX_DICT_LEN 1024000
+#define MAX_DICT_LEN 10240
 #define INIT_ALPH_LEN 257
 
 FILE *arch;
@@ -35,7 +35,6 @@ char **paths;
 
 int in_dict(int *seq);
 int dict_index(int *seq);
-void fill_dict(char *dict);
 void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount);
 void lzw_encrypt_file(char *path);
 char *lzw_decrypt(char *buff, FILE *from_arch, int amount);
@@ -43,12 +42,92 @@ void lzw_decrypt_file(char *path, FILE *from_arch);
 void append_dict(int *seq_address);
 void reset_dict();
 void init_dict();
-int fpeek(FILE *const fp);
 int streq(int *s1, int *s2);
 void append(int *seq, int c);
 void concat_r(char *res, int *seq);
 void concat_s(int *seq1, int *seq2);
 int len(int *seq);
+char *origin_folder(char *path);
+char *strremove(char *str, const char *sub);
+int is_regular_file(const char *path);
+int is_folder(const char *path);
+void paths2file(char *origin);
+void fill_paths(const char *name);
+void process_paths(char *prefix);
+char *without_filename(char *path);
+void make_archive(char *path_to_encrypt, char *output_path);
+void extract_archive(char *path_to_decrypt, char *output_path);
+char *filename_no_ext(char *path);
+char *prettify(char *path);
+int count_bits(int number);
+void write_as_bits(unsigned int number);
+void pack(int code);
+unsigned char read_next_bit(char *buff);
+int unpack(char *buff);
+
+int main(int argc, char *argv[])
+{
+    setbuf(stdout, NULL);
+    paths = malloc(PATHS_AMOUNT * sizeof(char *));
+    if (argc > 1)
+    {
+        char *extension = calloc(4, 1);
+        char *output_path = calloc(PATH_SIZE, 1);
+        if (!is_folder(argv[1]) && !is_regular_file(argv[1]))
+        {
+            printf("Input path does not exist");
+            exit(0);
+        }
+        if (argc == 3)
+        {
+            if (is_regular_file(argv[2]))
+            {
+                printf("Output folder path cannot be path to file\n");
+                exit(0);
+            }
+            else if (!is_folder(argv[2]))
+            {
+                char c;
+                printf("Output folder cannot be found, create it?(Y/N)\n");
+                scanf("%c", &c);
+                if (c == 'Y' || c == 'y')
+                {
+                    char *command = calloc(PATH_SIZE, 1);
+                    sprintf(command, "mkdir \"%s\"", argv[2]);
+                    system(command);
+                    if (!is_folder(argv[2]))
+                        exit(0);
+                }
+                else if (c == 'N' || c == 'n')
+                    exit(0);
+            }
+            strcpy(output_path, argv[2]);
+        }
+        else
+            strcpy(output_path, without_filename(argv[1]));
+        sprintf(extension, "%.*s", 4, argv[1] + strlen(argv[1]) - 4);
+        if (!strcmp(extension, ".zap"))
+        {
+            extract_archive(argv[1], output_path);
+        }
+        else
+        {
+            sprintf(output_path, "%s/%s.zap", output_path, filename_no_ext(argv[1]));
+            while (access(output_path, F_OK) == 0)
+            {
+                char c;
+                printf("%s -- already exists, overwrite?(Y/N)\n", prettify(output_path));
+                scanf("%c", &c);
+                if (c == 'N' || c == 'n')
+                    sprintf(output_path, "%s/%s-(2).zap", argc == 3 ? without_filename(argv[2]) : without_filename(argv[1]), filename_no_ext(argv[1]));
+                else if (c == 'Y' || c == 'y')
+                    break;
+            }
+            make_archive(argv[1], output_path);
+        }
+    }
+    return 0;
+}
 
 char *prettify(char *path)
 {
@@ -72,7 +151,8 @@ char *origin_folder(char *path)
 {
     char *origin = calloc(PATH_SIZE, 1);
     int i = strlen(path), j = 0;
-    while (((origin[j++] = path[--i]) != '/') && (origin[j - 1] != '\\'));
+    while (((origin[j++] = path[--i]) != '/') && (origin[j - 1] != '\\'))
+        ;
     i = 0;
     while (i < j / 2)
     {
@@ -182,7 +262,8 @@ char *without_filename(char *path)
     char *result = calloc(PATH_SIZE, 1);
     strcpy(result, path);
     int j = strlen(result) - 1;
-    while (result[j--] = 0, (result[j] != '/') && (result[j] != '\\'));
+    while (result[j--] = 0, (result[j] != '/') && (result[j] != '\\'))
+        ;
     for (int i = 0; i < strlen(result); i++)
         if (result[i] == '/')
             result[i] = '\\';
@@ -248,7 +329,7 @@ char *filename_no_ext(char *path)
     strremove(result, without_filename(result));
     if (is_folder(path))
         return result;
-    else 
+    else
     {
         int i = strlen(result);
         while (--i != 0)
@@ -261,70 +342,6 @@ char *filename_no_ext(char *path)
                 break;
         return result;
     }
-}
-
-int main(int argc, char *argv[])
-{
-    setbuf(stdout, NULL);
-    paths = malloc(PATHS_AMOUNT * sizeof(char *));
-    if (argc > 1)
-    {
-        char *extension = calloc(4, 1);
-        char *output_path = calloc(PATH_SIZE, 1);
-        if (!is_folder(argv[1]) && !is_regular_file(argv[1]))
-        {
-            printf("Input path does not exist");
-            exit(0);
-        }
-        if (argc == 3)
-        {
-            if (is_regular_file(argv[2]))
-            {
-                printf("Output folder path cannot be path to file\n");
-                exit(0);
-            }
-            else if (!is_folder(argv[2]))
-            {
-                char c;
-                printf("Output folder cannot be found, create it?(Y/N)\n");
-                scanf("%c", &c);
-                if (c == 'Y' || c == 'y')
-                {
-                    char *command = calloc(PATH_SIZE, 1);
-                    sprintf(command, "mkdir \"%s\"", argv[2]);
-                    system(command);
-                    if (!is_folder(argv[2]))
-                        exit(0);
-                }
-                else if (c == 'N' || c == 'n')
-                    exit(0);
-            }
-            strcpy(output_path, argv[2]);
-        }
-        else
-            strcpy(output_path, without_filename(argv[1]));
-        sprintf(extension, "%.*s", 4, argv[1] + strlen(argv[1]) - 4);
-        if (!strcmp(extension, ".zap"))
-        {
-            extract_archive(argv[1], output_path);
-        }
-        else
-        {
-            sprintf(output_path, "%s/%s.zap", output_path, filename_no_ext(argv[1]));
-            while (access(output_path, F_OK) == 0)
-            {
-                char c;
-                printf("%s -- already exists, overwrite?(Y/N)\n", prettify(output_path));
-                scanf("%c", &c);
-                if (c == 'N' || c == 'n')
-                    sprintf(output_path, "%s/%s-(2).zap", argc == 3 ? without_filename(argv[2]) : without_filename(argv[1]), filename_no_ext(argv[1]));
-                else if (c == 'Y' || c == 'y')
-                    break;
-            }
-            make_archive(argv[1], output_path);
-        }
-    }
-    return 0;
 }
 
 void write_bit(unsigned char bit)
@@ -450,7 +467,6 @@ void lzw_encrypt(unsigned char *buff, FILE *from_file, int amount)
             {
                 last = seq[--seq_len];
                 seq[seq_len] = 256;
-                int t = dict_index(seq);
                 pack(dict_index(seq));
                 append(seq, last);
                 append_dict(seq);
@@ -630,16 +646,6 @@ int dict_index(int *seq)
         if ((k != 256) && (k != 257))
             if (streq(dict[k], seq))
                 return k;
-}
-
-void fill_dict(char *dict) {
-    memset(dict, 0, sizeof dict);
-}
-
-int fpeek(FILE *const fp)
-{
-    const int c = getc(fp);
-    return c == EOF ? EOF : ungetc(c, fp);
 }
 
 int streq(int *s1, int *s2)
